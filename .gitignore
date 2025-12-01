@@ -27,3 +27,5 @@ frontend/wailsjs/
 *.swo
 *~
 data
+*.md 
+!README.md
