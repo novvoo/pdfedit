@@ -5,345 +5,571 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
-	"github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/novvoo/go-poppler/pkg/pdf"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+// App struct
 type App struct {
-	ctx context.Context
+	ctx         context.Context
+	currentDoc  *pdf.Document
+	currentPath string
 }
 
+// NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{}
 }
 
+// startup is called when the app starts
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-// OpenPDF 打开PDF文件选择对话框
+// ==================== 文件操作 ====================
+
+// OpenPDF opens a file dialog and returns the selected PDF path
 func (a *App) OpenPDF() (string, error) {
-	file, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "选择PDF文件",
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择 PDF 文件",
 		Filters: []runtime.FileFilter{
-			{DisplayName: "PDF文件 (*.pdf)", Pattern: "*.pdf"},
+			{DisplayName: "PDF Files", Pattern: "*.pdf"},
 		},
 	})
 	if err != nil {
 		return "", err
 	}
-	return file, nil
-}
-
-// MergePDFs 合并多个PDF文件
-func (a *App) MergePDFs(outputPath string, inputPaths []string) error {
-	return api.MergeCreateFile(inputPaths, outputPath, false, nil)
-}
-
-// SplitPDF 分割PDF
-func (a *App) SplitPDF(inputPath string, outputDir string) error {
-	return api.SplitFile(inputPath, outputDir, 1, nil)
-}
-
-// ExtractPages 提取指定页面
-func (a *App) ExtractPages(inputPath string, outputPath string, pages []int) error {
-	// Convert []int to []string for page numbers
-	pageStrs := make([]string, len(pages))
-	for i, p := range pages {
-		pageStrs[i] = fmt.Sprintf("%d", p)
+	if path == "" {
+		return "", nil
 	}
-	return api.ExtractPagesFile(inputPath, outputPath, pageStrs, nil)
+
+	// 打开文档
+	doc, err := pdf.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("无法打开 PDF: %w", err)
+	}
+
+	// 关闭之前的文档
+	if a.currentDoc != nil {
+		a.currentDoc.Close()
+	}
+
+	a.currentDoc = doc
+	a.currentPath = path
+	return path, nil
 }
 
-// RotatePages 旋转页面
-func (a *App) RotatePages(inputPath string, rotation int) error {
-	outputPath := inputPath + ".tmp"
-	err := api.RotateFile(inputPath, outputPath, rotation, nil, nil)
+// ClosePDF closes the current document
+func (a *App) ClosePDF() error {
+	if a.currentDoc != nil {
+		a.currentDoc.Close()
+		a.currentDoc = nil
+		a.currentPath = ""
+	}
+	return nil
+}
+
+// ==================== PDF 信息 ====================
+
+// PDFInfo contains PDF document information
+type PDFInfo struct {
+	Path         string            `json:"path"`
+	NumPages     int               `json:"numPages"`
+	Title        string            `json:"title"`
+	Author       string            `json:"author"`
+	Subject      string            `json:"subject"`
+	Keywords     string            `json:"keywords"`
+	Creator      string            `json:"creator"`
+	Producer     string            `json:"producer"`
+	CreationDate string            `json:"creationDate"`
+	ModDate      string            `json:"modDate"`
+	Version      string            `json:"version"`
+	Encrypted    bool              `json:"encrypted"`
+	Tagged       bool              `json:"tagged"`
+	HasForms     bool              `json:"hasForms"`
+	Metadata     map[string]string `json:"metadata"`
+}
+
+// GetPDFInfo returns information about the PDF
+func (a *App) GetPDFInfo(path string) (*PDFInfo, error) {
+	doc, err := pdf.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer doc.Close()
+
+	docInfo := doc.GetInfo()
+
+	info := &PDFInfo{
+		Path:         path,
+		NumPages:     doc.NumPages(),
+		Version:      doc.Version, // Version 是字段，不是方法
+		Title:        docInfo.Title,
+		Author:       docInfo.Author,
+		Subject:      docInfo.Subject,
+		Keywords:     docInfo.Keywords,
+		Creator:      docInfo.Creator,
+		Producer:     docInfo.Producer,
+		CreationDate: docInfo.CreationDateRaw,
+		ModDate:      docInfo.ModDateRaw,
+		Encrypted:    docInfo.Encrypted,
+		Tagged:       docInfo.Tagged,
+		HasForms:     docInfo.Form != "none",
+		Metadata:     docInfo.Custom,
+	}
+
+	return info, nil
+}
+
+// ==================== 页面操作 ====================
+
+// PageInfo contains page information
+type PageInfo struct {
+	Number   int     `json:"number"`
+	Width    float64 `json:"width"`
+	Height   float64 `json:"height"`
+	Rotation int     `json:"rotation"`
+	MediaBox Box     `json:"mediaBox"`
+	CropBox  Box     `json:"cropBox"`
+}
+
+type Box struct {
+	LLX float64 `json:"llx"`
+	LLY float64 `json:"lly"`
+	URX float64 `json:"urx"`
+	URY float64 `json:"ury"`
+}
+
+// GetPageInfo returns information about a specific page
+func (a *App) GetPageInfo(path string, pageNum int) (*PageInfo, error) {
+	doc, err := pdf.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer doc.Close()
+
+	if pageNum < 1 || pageNum > doc.NumPages() {
+		return nil, fmt.Errorf("页码超出范围")
+	}
+
+	page, err := doc.GetPage(pageNum)
+	if err != nil {
+		return nil, fmt.Errorf("无法获取页面: %w", err)
+	}
+
+	mediaBox := page.GetMediaBox()
+	cropBox := page.GetCropBox()
+
+	info := &PageInfo{
+		Number:   pageNum,
+		Width:    page.Width(),
+		Height:   page.Height(),
+		Rotation: page.GetRotation(),
+		MediaBox: Box{mediaBox.LLX, mediaBox.LLY, mediaBox.URX, mediaBox.URY},
+		CropBox:  Box{cropBox.LLX, cropBox.LLY, cropBox.URX, cropBox.URY},
+	}
+
+	return info, nil
+}
+
+// GetAllPagesInfo returns information about all pages
+func (a *App) GetAllPagesInfo(path string) ([]PageInfo, error) {
+	doc, err := pdf.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer doc.Close()
+
+	numPages := doc.NumPages()
+	pages := make([]PageInfo, numPages)
+
+	for i := 1; i <= numPages; i++ {
+		page, err := doc.GetPage(i)
+		if err != nil {
+			continue
+		}
+
+		mediaBox := page.GetMediaBox()
+		cropBox := page.GetCropBox()
+
+		pages[i-1] = PageInfo{
+			Number:   i,
+			Width:    page.Width(),
+			Height:   page.Height(),
+			Rotation: page.GetRotation(),
+			MediaBox: Box{mediaBox.LLX, mediaBox.LLY, mediaBox.URX, mediaBox.URY},
+			CropBox:  Box{cropBox.LLX, cropBox.LLY, cropBox.URX, cropBox.URY},
+		}
+	}
+
+	return pages, nil
+}
+
+// ==================== 渲染功能 ====================
+
+// RenderPDFPage renders a page to PNG and returns base64 encoded data
+func (a *App) RenderPDFPage(path string, pageNum int, dpi float64) (string, error) {
+	doc, err := pdf.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer doc.Close()
+
+	if dpi <= 0 {
+		dpi = 150
+	}
+
+	// 使用 PageRenderer 来获取 PNG 数据
+	pageRenderer := pdf.NewPageRenderer(doc, pdf.RenderOptions{
+		DPI:    dpi,
+		Format: "png",
+	})
+
+	renderedPage, err := pageRenderer.RenderPage(pageNum)
+	if err != nil {
+		return "", err
+	}
+
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(renderedPage.Data), nil
+}
+
+// RenderPageToFile renders a page to a file
+func (a *App) RenderPageToFile(path string, pageNum int, outputPath string, dpi float64, format string) error {
+	doc, err := pdf.Open(path)
 	if err != nil {
 		return err
 	}
-	// Replace original file with rotated version
-	os.Remove(inputPath)
-	return os.Rename(outputPath, inputPath)
+	defer doc.Close()
+
+	if dpi <= 0 {
+		dpi = 300
+	}
+
+	renderer := pdf.NewRenderer(doc)
+	renderer.SetResolution(dpi, dpi)
+
+	renderedImg, err := renderer.RenderPage(pageNum)
+	if err != nil {
+		return err
+	}
+
+	return renderer.SaveImage(renderedImg, outputPath, format)
 }
 
-// GetPDFInfo 获取PDF信息
-func (a *App) GetPDFInfo(filePath string) (map[string]interface{}, error) {
-	f, err := os.Open(filePath)
+// ==================== 文本操作 ====================
+
+// ExtractText extracts text from a page
+func (a *App) ExtractText(path string, pageNum int) (string, error) {
+	doc, err := pdf.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer doc.Close()
+
+	extractor := pdf.NewTextExtractor(doc)
+	return extractor.ExtractPageText(pageNum)
+}
+
+// ExtractAllText extracts text from all pages
+func (a *App) ExtractAllText(path string) (string, error) {
+	doc, err := pdf.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer doc.Close()
+
+	extractor := pdf.NewTextExtractor(doc)
+	return extractor.ExtractText()
+}
+
+// ==================== 注释操作 ====================
+
+// AnnotationInfo represents an annotation
+type AnnotationInfo struct {
+	Type     string  `json:"type"`
+	Subtype  string  `json:"subtype"`
+	Contents string  `json:"contents"`
+	Title    string  `json:"title"`
+	Date     string  `json:"date"`
+	X        float64 `json:"x"`
+	Y        float64 `json:"y"`
+	Width    float64 `json:"width"`
+	Height   float64 `json:"height"`
+	Color    string  `json:"color"`
+	URI      string  `json:"uri,omitempty"`
+}
+
+// GetAnnotations returns all annotations on a page
+func (a *App) GetAnnotations(path string, pageNum int) ([]AnnotationInfo, error) {
+	doc, err := pdf.Open(path)
 	if err != nil {
 		return nil, err
+	}
+	defer doc.Close()
+
+	extractor := pdf.NewAnnotationExtractor(doc)
+	annots, err := extractor.GetPageAnnotations(pageNum)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]AnnotationInfo, len(annots))
+	for i, annot := range annots {
+		info := AnnotationInfo{
+			Subtype:  annot.Subtype,
+			Contents: annot.Contents,
+			Title:    annot.Title,
+			Date:     annot.Modified,
+			X:        annot.Rect.LLX,
+			Y:        annot.Rect.LLY,
+			Width:    annot.Rect.URX - annot.Rect.LLX,
+			Height:   annot.Rect.URY - annot.Rect.LLY,
+		}
+		if len(annot.Color) >= 3 {
+			info.Color = fmt.Sprintf("#%02x%02x%02x",
+				int(annot.Color[0]*255), int(annot.Color[1]*255), int(annot.Color[2]*255))
+		}
+		if annot.Action != nil && annot.Action.URI != "" {
+			info.URI = annot.Action.URI
+		}
+		results[i] = info
+	}
+	return results, nil
+}
+
+// GetLinks returns all links on a page
+func (a *App) GetLinks(path string, pageNum int) ([]AnnotationInfo, error) {
+	doc, err := pdf.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer doc.Close()
+
+	extractor := pdf.NewAnnotationExtractor(doc)
+	links, err := extractor.GetLinks(pageNum)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]AnnotationInfo, len(links))
+	for i, link := range links {
+		info := AnnotationInfo{
+			Subtype: link.Subtype,
+			X:       link.Rect.LLX,
+			Y:       link.Rect.LLY,
+			Width:   link.Rect.URX - link.Rect.LLX,
+			Height:  link.Rect.URY - link.Rect.LLY,
+		}
+		if link.Action != nil && link.Action.URI != "" {
+			info.URI = link.Action.URI
+		}
+		results[i] = info
+	}
+	return results, nil
+}
+
+// ==================== 文档操作 ====================
+
+// MergePDFs merges multiple PDF files
+func (a *App) MergePDFs(inputPaths []string, outputPath string) error {
+	if len(inputPaths) == 0 {
+		return fmt.Errorf("没有输入文件")
+	}
+
+	docs := make([]*pdf.Document, len(inputPaths))
+	for i, p := range inputPaths {
+		doc, err := pdf.Open(p)
+		if err != nil {
+			// Close already opened docs
+			for j := 0; j < i; j++ {
+				docs[j].Close()
+			}
+			return err
+		}
+		docs[i] = doc
+	}
+	defer func() {
+		for _, doc := range docs {
+			doc.Close()
+		}
+	}()
+
+	return pdf.MergeDocuments(docs, outputPath)
+}
+
+// SplitPDF splits a PDF into individual pages
+func (a *App) SplitPDF(inputPath string, outputDir string) ([]string, error) {
+	doc, err := pdf.Open(inputPath)
+	if err != nil {
+		return nil, err
+	}
+	defer doc.Close()
+
+	baseName := strings.TrimSuffix(filepath.Base(inputPath), ".pdf")
+	var outputPaths []string
+
+	for i := 1; i <= doc.NumPages(); i++ {
+		outputPath := filepath.Join(outputDir, fmt.Sprintf("%s_page_%d.pdf", baseName, i))
+		err := pdf.ExtractPage(doc, i, outputPath)
+		if err != nil {
+			return outputPaths, err
+		}
+		outputPaths = append(outputPaths, outputPath)
+	}
+
+	return outputPaths, nil
+}
+
+// ExtractSinglePage extracts a single page from a PDF
+func (a *App) ExtractSinglePage(inputPath string, pageNum int, outputPath string) error {
+	doc, err := pdf.Open(inputPath)
+	if err != nil {
+		return err
+	}
+	defer doc.Close()
+
+	return pdf.ExtractPage(doc, pageNum, outputPath)
+}
+
+// ==================== 导出功能 ====================
+
+// ExportToText exports the document to plain text
+func (a *App) ExportToText(path string, outputPath string) error {
+	doc, err := pdf.Open(path)
+	if err != nil {
+		return err
+	}
+	defer doc.Close()
+
+	extractor := pdf.NewTextExtractor(doc)
+	text, err := extractor.ExtractText()
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(outputPath, []byte(text), 0644)
+}
+
+// ExportToSVG exports a page to SVG format
+func (a *App) ExportToSVG(path string, pageNum int, outputPath string) error {
+	doc, err := pdf.Open(path)
+	if err != nil {
+		return err
+	}
+	defer doc.Close()
+
+	renderer := pdf.NewCairoRenderer(doc, pdf.CairoOptions{
+		FirstPage: pageNum,
+		LastPage:  pageNum,
+		Format:    "svg",
+	})
+
+	f, err := os.Create(outputPath)
+	if err != nil {
+		return err
 	}
 	defer f.Close()
 
-	info, err := api.PDFInfo(f, "", nil, false, nil)
+	return renderer.Render(f)
+}
+
+// ExportToPS exports the document to PostScript
+func (a *App) ExportToPS(path string, outputPath string) error {
+	doc, err := pdf.Open(path)
+	if err != nil {
+		return err
+	}
+	defer doc.Close()
+
+	psWriter := pdf.NewPostScriptWriter(doc, pdf.PSOptions{
+		Level: 2,
+	})
+
+	f, err := os.Create(outputPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	return psWriter.Write(f)
+}
+
+// ==================== 元数据 ====================
+
+// GetMetadata returns XMP metadata as string
+func (a *App) GetMetadata(path string) (string, error) {
+	doc, err := pdf.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer doc.Close()
+
+	return doc.GetMetadata(), nil
+}
+
+// GetJavaScript returns all JavaScript in the document
+func (a *App) GetJavaScript(path string) ([]string, error) {
+	doc, err := pdf.Open(path)
 	if err != nil {
 		return nil, err
 	}
+	defer doc.Close()
 
-	pageCount, _ := api.PageCountFile(filePath)
-
-	result := map[string]interface{}{
-		"info":      info,
-		"pageCount": pageCount,
-		"message":   fmt.Sprintf("PDF有 %d 页", pageCount),
-	}
-	return result, nil
+	return doc.GetJavaScript(), nil
 }
 
-// OptimizePDF 优化PDF文件大小
-func (a *App) OptimizePDF(inputPath string) error {
-	outputPath := inputPath + ".optimized.pdf"
-	err := api.OptimizeFile(inputPath, outputPath, nil)
+// GetNamedDestinations returns all named destinations
+func (a *App) GetNamedDestinations(path string) (map[string]interface{}, error) {
+	doc, err := pdf.Open(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	os.Remove(inputPath)
-	return os.Rename(outputPath, inputPath)
+	defer doc.Close()
+
+	return doc.GetNamedDestinations(), nil
 }
 
-// AddWatermark 添加文字水印
-func (a *App) AddWatermark(inputPath string, text string) error {
-	outputPath := inputPath + ".watermarked.pdf"
-	err := api.AddTextWatermarksFile(inputPath, outputPath, nil, true, text, "", nil)
-	if err != nil {
-		return err
-	}
-	os.Remove(inputPath)
-	return os.Rename(outputPath, inputPath)
-}
+// ==================== 选择文件对话框 ====================
 
-// RemoveWatermark 移除水印
-func (a *App) RemoveWatermark(inputPath string) error {
-	outputPath := inputPath + ".nowatermark.pdf"
-	err := api.RemoveWatermarksFile(inputPath, outputPath, nil, nil)
-	if err != nil {
-		return err
-	}
-	os.Remove(inputPath)
-	return os.Rename(outputPath, inputPath)
-}
-
-// EncryptPDF 加密PDF
-func (a *App) EncryptPDF(inputPath string, userPassword string, ownerPassword string) error {
-	outputPath := inputPath + ".encrypted.pdf"
-	conf := api.LoadConfiguration()
-	conf.UserPW = userPassword
-	conf.OwnerPW = ownerPassword
-	err := api.EncryptFile(inputPath, outputPath, conf)
-	if err != nil {
-		return err
-	}
-	os.Remove(inputPath)
-	return os.Rename(outputPath, inputPath)
-}
-
-// DecryptPDF 解密PDF
-func (a *App) DecryptPDF(inputPath string, password string) error {
-	outputPath := inputPath + ".decrypted.pdf"
-	conf := api.LoadConfiguration()
-	conf.UserPW = password
-	err := api.DecryptFile(inputPath, outputPath, conf)
-	if err != nil {
-		return err
-	}
-	os.Remove(inputPath)
-	return os.Rename(outputPath, inputPath)
-}
-
-// ExtractImages 提取PDF中的图片
-func (a *App) ExtractImages(inputPath string, outputDir string) error {
-	return api.ExtractImagesFile(inputPath, outputDir, nil, nil)
-}
-
-// RemovePages 删除指定页面
-func (a *App) RemovePages(inputPath string, pages []int) error {
-	outputPath := inputPath + ".removed.pdf"
-	pageStrs := make([]string, len(pages))
-	for i, p := range pages {
-		pageStrs[i] = fmt.Sprintf("%d", p)
-	}
-	err := api.RemovePagesFile(inputPath, outputPath, pageStrs, nil)
-	if err != nil {
-		return err
-	}
-	os.Remove(inputPath)
-	return os.Rename(outputPath, inputPath)
-}
-
-// InsertPages 插入空白页
-func (a *App) InsertPages(inputPath string, pageNr int, count int) error {
-	outputPath := inputPath + ".inserted.pdf"
-	pageStrs := []string{fmt.Sprintf("%d", pageNr)}
-	err := api.InsertPagesFile(inputPath, outputPath, pageStrs, true, nil, nil)
-	if err != nil {
-		return err
-	}
-	os.Remove(inputPath)
-	return os.Rename(outputPath, inputPath)
-}
-
-// SaveAs 另存为
-func (a *App) SaveAs(inputPath string) (string, error) {
-	outputPath, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           "另存为",
-		DefaultFilename: "output.pdf",
+// SelectPDFFiles opens a dialog to select multiple PDF files
+func (a *App) SelectPDFFiles() ([]string, error) {
+	paths, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择 PDF 文件",
 		Filters: []runtime.FileFilter{
-			{DisplayName: "PDF文件 (*.pdf)", Pattern: "*.pdf"},
-		},
-	})
-	if err != nil {
-		return "", err
-	}
-	if outputPath == "" {
-		return "", fmt.Errorf("未选择保存路径")
-	}
-
-	// 复制文件
-	input, err := os.ReadFile(inputPath)
-	if err != nil {
-		return "", err
-	}
-	err = os.WriteFile(outputPath, input, 0644)
-	if err != nil {
-		return "", err
-	}
-	return outputPath, nil
-}
-
-// SelectMultiplePDFs 选择多个PDF文件用于合并
-func (a *App) SelectMultiplePDFs() ([]string, error) {
-	files, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "选择要合并的PDF文件",
-		Filters: []runtime.FileFilter{
-			{DisplayName: "PDF文件 (*.pdf)", Pattern: "*.pdf"},
+			{DisplayName: "PDF Files", Pattern: "*.pdf"},
 		},
 	})
 	if err != nil {
 		return nil, err
 	}
-	return files, nil
+	return paths, nil
 }
 
-// SelectDirectory 选择目录
-func (a *App) SelectDirectory() (string, error) {
-	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+// SelectOutputFile opens a dialog to select output file
+func (a *App) SelectOutputFile(defaultName string) (string, error) {
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "保存文件",
+		DefaultFilename: defaultName,
+		Filters: []runtime.FileFilter{
+			{DisplayName: "PDF Files", Pattern: "*.pdf"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// SelectOutputDirectory opens a dialog to select output directory
+func (a *App) SelectOutputDirectory() (string, error) {
+	path, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "选择输出目录",
 	})
 	if err != nil {
 		return "", err
 	}
-	return dir, nil
-}
-
-// ReadPDFAsBase64 读取PDF文件并返回base64编码
-func (a *App) ReadPDFAsBase64(filePath string) (string, error) {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(data), nil
-}
-
-// RenderPDFPage 渲染PDF页面为PNG图片（base64编码）
-func (a *App) RenderPDFPage(filePath string, pageNum int, scale float64) (string, error) {
-	// 创建临时目录
-	tempDir := fmt.Sprintf("%s_temp_page%d", filePath, pageNum)
-	os.MkdirAll(tempDir, 0755)
-	defer os.RemoveAll(tempDir)
-	
-	// 使用pdfcpu提取单页到临时目录
-	pageStr := fmt.Sprintf("%d", pageNum)
-	err := api.ExtractPagesFile(filePath, tempDir, []string{pageStr}, nil)
-	if err != nil {
-		return "", fmt.Errorf("提取页面失败: %v", err)
-	}
-	
-	// 查找生成的PDF文件
-	files, err := os.ReadDir(tempDir)
-	if err != nil {
-		return "", fmt.Errorf("读取临时目录失败: %v", err)
-	}
-	
-	if len(files) == 0 {
-		return "", fmt.Errorf("未找到提取的页面文件")
-	}
-	
-	// 读取第一个PDF文件（使用filepath.Join处理路径）
-	tempPDFPath := tempDir + string(os.PathSeparator) + files[0].Name()
-	data, err := os.ReadFile(tempPDFPath)
-	if err != nil {
-		return "", fmt.Errorf("读取页面文件失败: %v", err)
-	}
-	
-	// 返回PDF数据的base64编码
-	return base64.StdEncoding.EncodeToString(data), nil
-}
-
-// ReadPDFPagesAsBase64 读取PDF指定页面范围并返回base64编码（懒加载优化）
-// startPage: 起始页码（从1开始）
-// endPage: 结束页码（包含）
-func (a *App) ReadPDFPagesAsBase64(filePath string, startPage int, endPage int) (string, error) {
-	// 创建临时文件用于存储提取的页面
-	tempFile := filePath + ".temp.pdf"
-	defer os.Remove(tempFile)
-
-	// 提取指定页面范围
-	pageStrs := []string{}
-	for i := startPage; i <= endPage; i++ {
-		pageStrs = append(pageStrs, fmt.Sprintf("%d", i))
-	}
-
-	err := api.ExtractPagesFile(filePath, tempFile, pageStrs, nil)
-	if err != nil {
-		return "", err
-	}
-
-	// 读取提取后的PDF
-	data, err := os.ReadFile(tempFile)
-	if err != nil {
-		return "", err
-	}
-
-	return base64.StdEncoding.EncodeToString(data), nil
-}
-
-// OutlineItem 表示PDF大纲项
-type OutlineItem struct {
-	Title    string         `json:"title"`
-	Page     int            `json:"page"`
-	Children []OutlineItem  `json:"children,omitempty"`
-}
-
-// GetPDFOutline 获取PDF目录大纲
-func (a *App) GetPDFOutline(filePath string) ([]OutlineItem, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	// 使用pdfcpu获取大纲信息
-	// 注意：pdfcpu的大纲功能可能有限，这里提供基本实现
-	// 如果需要更完整的大纲支持，可能需要使用其他库
-	
-	// 目前pdfcpu没有直接的大纲提取API
-	// 这里返回一个空数组，表示功能已准备好但需要更高级的PDF库
-	return []OutlineItem{}, nil
-}
-
-// GetPDFPageSize 获取PDF页面尺寸
-func (a *App) GetPDFPageSize(filePath string, pageNum int) (map[string]float64, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	
-	// 使用pdfcpu获取页面信息
-	// 返回默认尺寸（A4: 595x842 points）
-	return map[string]float64{
-		"width":  595,
-		"height": 842,
-	}, nil
+	return path, nil
 }

@@ -108,8 +108,8 @@ export default function GoPDFViewer({
       try {
         // 调用Go后端渲染页面
         console.log(`📡 调用后端渲染第 ${page} 页，缩放: ${currentScale}`)
-        const base64Data = await RenderPDFPage(file, page, currentScale)
-        const dataUrl = `data:application/pdf;base64,${base64Data}`
+        // 后端返回的已经是完整的 data URL (data:image/png;base64,...)
+        const dataUrl = await RenderPDFPage(file, page, currentScale * 150)
         
         if (!isMounted) return
         
@@ -340,14 +340,14 @@ export default function GoPDFViewer({
           </Box>
         ) : pageImage ? (
           <Box
-            component="iframe"
+            component="img"
             src={pageImage}
+            alt={`Page ${pageNumber}`}
             sx={{
-              border: 'none',
               bgcolor: 'white',
               boxShadow: 3,
-              width: `${595 * scale}px`,
-              height: `${842 * scale}px`,
+              maxWidth: '100%',
+              height: 'auto',
             }}
           />
         ) : (

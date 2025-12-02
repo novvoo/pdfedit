@@ -21,68 +21,85 @@ import {
   Snackbar,
   Alert,
   Chip,
+  IconButton,
+  Tooltip,
 } from '@mui/material'
 import {
   PictureAsPdf,
   MergeType,
   ContentCut,
-  Rotate90DegreesCcw,
   Info,
   FolderOpen,
-  Save,
-  SaveAs,
   Close,
-  Compress,
   TextFields,
-  Lock,
-  LockOpen,
-  Image,
-  DeleteOutline,
-  AddCircleOutline,
   Visibility,
   ViewSidebar,
+  Image,
+  FirstPage,
+  LastPage,
+  NavigateBefore,
+  NavigateNext,
+  Comment,
+  Link,
+  Help,
+  Fullscreen,
+  GridView,
+  ViewList,
+  FileCopy,
+  Undo,
+  Redo,
+  SelectAll,
+  ContentCopy,
+  Code,
+  Description,
+  PhotoSizeSelectLarge,
 } from '@mui/icons-material'
 import {
   OpenPDF,
+  ClosePDF,
   GetPDFInfo,
-  SaveAs as SaveAsFile,
-  OptimizePDF,
-  AddWatermark,
-  RemoveWatermark,
-  EncryptPDF,
-  DecryptPDF,
-  ExtractImages,
-  RotatePages,
-  SelectMultiplePDFs,
   MergePDFs,
-  SelectDirectory,
   SplitPDF,
-  GetPDFOutline,
+  ExtractAllText,
+  ExtractText,
+  SelectPDFFiles,
+  SelectOutputFile,
+  SelectOutputDirectory,
+  ExportToText,
+  GetAnnotations,
+  GetLinks,
+  RenderPageToFile,
+  ExtractSinglePage,
+  GetMetadata,
 } from '../wailsjs/go/main/App'
 import GoPDFViewer from './GoPDFViewer'
-import LayerBasedEditor from './LayerBasedEditor'
-import OutlinePanel from './OutlinePanel'
 
 function App() {
   const [selectedFile, setSelectedFile] = useState<string>('')
   const [pdfInfo, setPdfInfo] = useState<any>(null)
-  const [outline, setOutline] = useState<any[]>([])
   const [currentPage, setCurrentPage] = useState<number>(1)
+  
+  // 菜单锚点
   const [fileMenuAnchor, setFileMenuAnchor] = useState<null | HTMLElement>(null)
   const [editMenuAnchor, setEditMenuAnchor] = useState<null | HTMLElement>(null)
   const [toolsMenuAnchor, setToolsMenuAnchor] = useState<null | HTMLElement>(null)
   const [viewMenuAnchor, setViewMenuAnchor] = useState<null | HTMLElement>(null)
+  const [exportMenuAnchor, setExportMenuAnchor] = useState<null | HTMLElement>(null)
+  const [helpMenuAnchor, setHelpMenuAnchor] = useState<null | HTMLElement>(null)
   
   // 对话框状态
-  const [watermarkDialog, setWatermarkDialog] = useState(false)
-  const [watermarkText, setWatermarkText] = useState('')
-  const [rotateDialog, setRotateDialog] = useState(false)
-  const [rotationAngle, setRotationAngle] = useState('90')
-  const [encryptDialog, setEncryptDialog] = useState(false)
-  const [userPassword, setUserPassword] = useState('')
-  const [ownerPassword, setOwnerPassword] = useState('')
-  const [decryptDialog, setDecryptDialog] = useState(false)
-  const [decryptPassword, setDecryptPassword] = useState('')
+  const [infoDialog, setInfoDialog] = useState(false)
+  const [textDialog, setTextDialog] = useState(false)
+  const [extractedText, setExtractedText] = useState('')
+  const [annotationsDialog, setAnnotationsDialog] = useState(false)
+  const [annotations, setAnnotations] = useState<any[]>([])
+  const [linksDialog, setLinksDialog] = useState(false)
+  const [links, setLinks] = useState<any[]>([])
+  const [metadataDialog, setMetadataDialog] = useState(false)
+  const [metadata, setMetadata] = useState('')
+  const [pageTextDialog, setPageTextDialog] = useState(false)
+  const [pageText, setPageText] = useState('')
+  const [aboutDialog, setAboutDialog] = useState(false)
   
   // 加载和通知状态
   const [loading, setLoading] = useState(false)
@@ -91,7 +108,7 @@ function App() {
   // 视图状态
   const [showViewer, setShowViewer] = useState(true)
   const [showSidebar, setShowSidebar] = useState(true)
-  const [editMode, setEditMode] = useState(true) // 默认编辑模式
+  const [viewMode, setViewMode] = useState<'single' | 'grid'>('single')
   
   const showMessage = (message: string, severity: 'success' | 'error' | 'info' = 'success') => {
     setSnackbar({ open: true, message, severity })
@@ -109,16 +126,8 @@ function App() {
         setSelectedFile(file)
         const info = await GetPDFInfo(file)
         setPdfInfo(info)
-        // 获取PDF大纲
-        try {
-          const outlineData = await GetPDFOutline(file)
-          setOutline(outlineData || [])
-        } catch (e) {
-          console.log('获取大纲失败:', e)
-          setOutline([])
-        }
         setCurrentPage(1)
-        showMessage('PDF文件打开成功 (Go渲染模式)', 'success')
+        showMessage('PDF文件打开成功', 'success')
       }
     } catch (error) {
       showMessage(`打开PDF失败: ${error}`, 'error')
@@ -128,177 +137,33 @@ function App() {
     }
   }
 
-  const handleCloseFile = () => {
-    setSelectedFile('')
-    setPdfInfo(null)
-    setOutline([])
-    setCurrentPage(1)
-    setFileMenuAnchor(null)
-    showMessage('文件已关闭', 'info')
-  }
-
-  const handleSaveAs = async () => {
-    if (!selectedFile) return
-    setLoading(true)
+  const handleCloseFile = async () => {
     try {
-      const newPath = await SaveAsFile(selectedFile)
-      if (newPath) {
-        showMessage(`文件已保存到: ${newPath}`, 'success')
-      }
-    } catch (error) {
-      showMessage(`保存失败: ${error}`, 'error')
-    } finally {
-      setLoading(false)
+      await ClosePDF()
+      setSelectedFile('')
+      setPdfInfo(null)
+      setCurrentPage(1)
       setFileMenuAnchor(null)
-    }
-  }
-
-  const handleOptimize = async () => {
-    if (!selectedFile) return
-    setLoading(true)
-    try {
-      await OptimizePDF(selectedFile)
-      showMessage('PDF优化成功！文件大小已减小', 'success')
+      showMessage('文件已关闭', 'info')
     } catch (error) {
-      showMessage(`优化失败: ${error}`, 'error')
-    } finally {
-      setLoading(false)
-      setToolsMenuAnchor(null)
-    }
-  }
-
-  const handleAddWatermarkClick = () => {
-    setToolsMenuAnchor(null)
-    setWatermarkDialog(true)
-  }
-
-  const handleAddWatermarkConfirm = async () => {
-    if (!selectedFile || !watermarkText) return
-    setLoading(true)
-    setWatermarkDialog(false)
-    try {
-      await AddWatermark(selectedFile, watermarkText)
-      showMessage('水印添加成功！', 'success')
-      setWatermarkText('')
-    } catch (error) {
-      showMessage(`添加水印失败: ${error}`, 'error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleRemoveWatermark = async () => {
-    if (!selectedFile) return
-    setLoading(true)
-    try {
-      await RemoveWatermark(selectedFile)
-      showMessage('水印移除成功！', 'success')
-    } catch (error) {
-      showMessage(`移除水印失败: ${error}`, 'error')
-    } finally {
-      setLoading(false)
-      setToolsMenuAnchor(null)
-    }
-  }
-
-  const handleEncryptClick = () => {
-    setToolsMenuAnchor(null)
-    setEncryptDialog(true)
-  }
-
-  const handleEncryptConfirm = async () => {
-    if (!selectedFile || !userPassword || !ownerPassword) return
-    setLoading(true)
-    setEncryptDialog(false)
-    try {
-      await EncryptPDF(selectedFile, userPassword, ownerPassword)
-      showMessage('PDF加密成功！', 'success')
-      setUserPassword('')
-      setOwnerPassword('')
-    } catch (error) {
-      showMessage(`加密失败: ${error}`, 'error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleDecryptClick = () => {
-    setToolsMenuAnchor(null)
-    setDecryptDialog(true)
-  }
-
-  const handleDecryptConfirm = async () => {
-    if (!selectedFile || !decryptPassword) return
-    setLoading(true)
-    setDecryptDialog(false)
-    try {
-      await DecryptPDF(selectedFile, decryptPassword)
-      showMessage('PDF解密成功！', 'success')
-      setDecryptPassword('')
-    } catch (error) {
-      showMessage(`解密失败: ${error}`, 'error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleExtractImages = async () => {
-    if (!selectedFile) return
-    setLoading(true)
-    try {
-      const dir = await SelectDirectory()
-      if (!dir) {
-        setLoading(false)
-        return
-      }
-      await ExtractImages(selectedFile, dir)
-      showMessage(`图片已提取到: ${dir}`, 'success')
-    } catch (error) {
-      showMessage(`提取图片失败: ${error}`, 'error')
-    } finally {
-      setLoading(false)
-      setToolsMenuAnchor(null)
-    }
-  }
-
-  const handleRotateClick = () => {
-    setEditMenuAnchor(null)
-    setRotateDialog(true)
-  }
-
-  const handleRotateConfirm = async () => {
-    if (!selectedFile) return
-    setLoading(true)
-    setRotateDialog(false)
-    try {
-      await RotatePages(selectedFile, parseInt(rotationAngle))
-      // 重新加载PDF信息
-      const info = await GetPDFInfo(selectedFile)
-      setPdfInfo(info)
-      // 刷新当前页面显示
-      setCurrentPage(prev => prev)
-      showMessage('页面旋转成功！', 'success')
-    } catch (error) {
-      showMessage(`旋转失败: ${error}`, 'error')
-    } finally {
-      setLoading(false)
+      showMessage(`关闭文件失败: ${error}`, 'error')
     }
   }
 
   const handleMerge = async () => {
     setLoading(true)
     try {
-      const files = await SelectMultiplePDFs()
+      const files = await SelectPDFFiles()
       if (!files || files.length === 0) {
         setLoading(false)
         return
       }
-      const outputPath = await SaveAsFile(files[0])
+      const outputPath = await SelectOutputFile('merged.pdf')
       if (!outputPath) {
         setLoading(false)
         return
       }
-      await MergePDFs(outputPath, files)
+      await MergePDFs(files, outputPath)
       showMessage(`PDF合并成功！保存到: ${outputPath}`, 'success')
     } catch (error) {
       showMessage(`合并失败: ${error}`, 'error')
@@ -312,13 +177,13 @@ function App() {
     if (!selectedFile) return
     setLoading(true)
     try {
-      const dir = await SelectDirectory()
+      const dir = await SelectOutputDirectory()
       if (!dir) {
         setLoading(false)
         return
       }
-      await SplitPDF(selectedFile, dir)
-      showMessage(`PDF已分割到: ${dir}`, 'success')
+      const outputFiles = await SplitPDF(selectedFile, dir)
+      showMessage(`PDF已分割为 ${outputFiles.length} 个文件到: ${dir}`, 'success')
     } catch (error) {
       showMessage(`分割失败: ${error}`, 'error')
     } finally {
@@ -327,8 +192,151 @@ function App() {
     }
   }
 
+  const handleExtractText = async () => {
+    if (!selectedFile) return
+    setLoading(true)
+    try {
+      const text = await ExtractAllText(selectedFile)
+      setExtractedText(text)
+      setTextDialog(true)
+    } catch (error) {
+      showMessage(`提取文本失败: ${error}`, 'error')
+    } finally {
+      setLoading(false)
+      setToolsMenuAnchor(null)
+    }
+  }
+
+  const handleExtractPageText = async () => {
+    if (!selectedFile) return
+    setLoading(true)
+    try {
+      const text = await ExtractText(selectedFile, currentPage)
+      setPageText(text)
+      setPageTextDialog(true)
+    } catch (error) {
+      showMessage(`提取当前页文本失败: ${error}`, 'error')
+    } finally {
+      setLoading(false)
+      setToolsMenuAnchor(null)
+    }
+  }
+
+  const handleExportText = async () => {
+    if (!selectedFile) return
+    setLoading(true)
+    try {
+      const outputPath = await SelectOutputFile('output.txt')
+      if (!outputPath) {
+        setLoading(false)
+        return
+      }
+      await ExportToText(selectedFile, outputPath)
+      showMessage(`文本已导出到: ${outputPath}`, 'success')
+    } catch (error) {
+      showMessage(`导出失败: ${error}`, 'error')
+    } finally {
+      setLoading(false)
+      setExportMenuAnchor(null)
+    }
+  }
+
+  const handleExportPageAsImage = async () => {
+    if (!selectedFile) return
+    setLoading(true)
+    try {
+      const outputPath = await SelectOutputFile(`page_${currentPage}.png`)
+      if (!outputPath) {
+        setLoading(false)
+        return
+      }
+      await RenderPageToFile(selectedFile, currentPage, outputPath, 300, 'png')
+      showMessage(`页面已导出为图片: ${outputPath}`, 'success')
+    } catch (error) {
+      showMessage(`导出图片失败: ${error}`, 'error')
+    } finally {
+      setLoading(false)
+      setExportMenuAnchor(null)
+    }
+  }
+
+  const handleExtractCurrentPage = async () => {
+    if (!selectedFile) return
+    setLoading(true)
+    try {
+      const outputPath = await SelectOutputFile(`page_${currentPage}.pdf`)
+      if (!outputPath) {
+        setLoading(false)
+        return
+      }
+      await ExtractSinglePage(selectedFile, currentPage, outputPath)
+      showMessage(`当前页已提取到: ${outputPath}`, 'success')
+    } catch (error) {
+      showMessage(`提取页面失败: ${error}`, 'error')
+    } finally {
+      setLoading(false)
+      setEditMenuAnchor(null)
+    }
+  }
+
+  const handleShowInfo = () => {
+    setInfoDialog(true)
+    setToolsMenuAnchor(null)
+  }
+
+  const handleShowAnnotations = async () => {
+    if (!selectedFile) return
+    setLoading(true)
+    try {
+      const annots = await GetAnnotations(selectedFile, currentPage)
+      setAnnotations(annots || [])
+      setAnnotationsDialog(true)
+    } catch (error) {
+      showMessage(`获取注释失败: ${error}`, 'error')
+    } finally {
+      setLoading(false)
+      setToolsMenuAnchor(null)
+    }
+  }
+
+  const handleShowLinks = async () => {
+    if (!selectedFile) return
+    setLoading(true)
+    try {
+      const pageLinks = await GetLinks(selectedFile, currentPage)
+      setLinks(pageLinks || [])
+      setLinksDialog(true)
+    } catch (error) {
+      showMessage(`获取链接失败: ${error}`, 'error')
+    } finally {
+      setLoading(false)
+      setToolsMenuAnchor(null)
+    }
+  }
+
+  const handleShowMetadata = async () => {
+    if (!selectedFile) return
+    setLoading(true)
+    try {
+      const meta = await GetMetadata(selectedFile)
+      setMetadata(meta || '无元数据')
+      setMetadataDialog(true)
+    } catch (error) {
+      showMessage(`获取元数据失败: ${error}`, 'error')
+    } finally {
+      setLoading(false)
+      setToolsMenuAnchor(null)
+    }
+  }
+
   const getFileName = (path: string) => {
     return path.split('\\').pop()?.split('/').pop() || path
+  }
+
+  const goToPage = (page: number) => {
+    if (page >= 1 && page <= (pdfInfo?.numPages || 1)) {
+      setCurrentPage(page)
+    }
   }
 
   return (
@@ -339,7 +347,7 @@ function App() {
           display: 'flex',
           alignItems: 'center',
           px: 2,
-          py: 1,
+          py: 0.5,
           bgcolor: '#1976d2',
           color: 'white',
           minHeight: 48,
@@ -351,39 +359,86 @@ function App() {
         </Typography>
         
         {/* 菜单栏 */}
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        <Box sx={{ display: 'flex', gap: 0.5 }}>
           <Button
             color="inherit"
             onClick={(e) => setFileMenuAnchor(e.currentTarget)}
-            sx={{ textTransform: 'none' }}
+            sx={{ textTransform: 'none', minWidth: 'auto', px: 1.5 }}
           >
             文件
           </Button>
           <Button
             color="inherit"
             onClick={(e) => setEditMenuAnchor(e.currentTarget)}
-            disabled={!selectedFile}
-            sx={{ textTransform: 'none' }}
+            sx={{ textTransform: 'none', minWidth: 'auto', px: 1.5 }}
           >
             编辑
           </Button>
           <Button
             color="inherit"
+            onClick={(e) => setViewMenuAnchor(e.currentTarget)}
+            sx={{ textTransform: 'none', minWidth: 'auto', px: 1.5 }}
+          >
+            视图
+          </Button>
+          <Button
+            color="inherit"
             onClick={(e) => setToolsMenuAnchor(e.currentTarget)}
-            disabled={!selectedFile}
-            sx={{ textTransform: 'none' }}
+            sx={{ textTransform: 'none', minWidth: 'auto', px: 1.5 }}
           >
             工具
           </Button>
           <Button
             color="inherit"
-            onClick={(e) => setViewMenuAnchor(e.currentTarget)}
+            onClick={(e) => setExportMenuAnchor(e.currentTarget)}
             disabled={!selectedFile}
-            sx={{ textTransform: 'none' }}
+            sx={{ textTransform: 'none', minWidth: 'auto', px: 1.5 }}
           >
-            视图
+            导出
+          </Button>
+          <Button
+            color="inherit"
+            onClick={(e) => setHelpMenuAnchor(e.currentTarget)}
+            sx={{ textTransform: 'none', minWidth: 'auto', px: 1.5 }}
+          >
+            帮助
           </Button>
         </Box>
+
+        {/* 工具栏快捷按钮 */}
+        {selectedFile && (
+          <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Tooltip title="第一页">
+              <IconButton color="inherit" size="small" onClick={() => goToPage(1)} disabled={currentPage <= 1}>
+                <FirstPage />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="上一页">
+              <IconButton color="inherit" size="small" onClick={() => goToPage(currentPage - 1)} disabled={currentPage <= 1}>
+                <NavigateBefore />
+              </IconButton>
+            </Tooltip>
+            <Typography variant="body2" sx={{ mx: 1 }}>
+              {currentPage} / {pdfInfo?.numPages || 0}
+            </Typography>
+            <Tooltip title="下一页">
+              <IconButton color="inherit" size="small" onClick={() => goToPage(currentPage + 1)} disabled={currentPage >= (pdfInfo?.numPages || 1)}>
+                <NavigateNext />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="最后一页">
+              <IconButton color="inherit" size="small" onClick={() => goToPage(pdfInfo?.numPages || 1)} disabled={currentPage >= (pdfInfo?.numPages || 1)}>
+                <LastPage />
+              </IconButton>
+            </Tooltip>
+            <Divider orientation="vertical" flexItem sx={{ mx: 1, bgcolor: 'rgba(255,255,255,0.3)' }} />
+            <Tooltip title="文档信息">
+              <IconButton color="inherit" size="small" onClick={handleShowInfo}>
+                <Info />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        )}
       </Box>
 
       {/* 文件菜单 */}
@@ -393,35 +448,15 @@ function App() {
         onClose={() => setFileMenuAnchor(null)}
       >
         <MenuItem onClick={handleOpenPDF}>
-          <ListItemIcon>
-            <FolderOpen fontSize="small" />
-          </ListItemIcon>
+          <ListItemIcon><FolderOpen fontSize="small" /></ListItemIcon>
           <ListItemText>打开...</ListItemText>
-          <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>
-            Ctrl+O
-          </Typography>
-        </MenuItem>
-        <MenuItem disabled={!selectedFile}>
-          <ListItemIcon>
-            <Save fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>保存</ListItemText>
-          <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>
-            Ctrl+S
-          </Typography>
-        </MenuItem>
-        <MenuItem onClick={handleSaveAs} disabled={!selectedFile}>
-          <ListItemIcon>
-            <SaveAs fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>另存为...</ListItemText>
+          <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>⌘O</Typography>
         </MenuItem>
         <Divider />
         <MenuItem onClick={handleCloseFile} disabled={!selectedFile}>
-          <ListItemIcon>
-            <Close fontSize="small" />
-          </ListItemIcon>
+          <ListItemIcon><Close fontSize="small" /></ListItemIcon>
           <ListItemText>关闭</ListItemText>
+          <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>⌘W</Typography>
         </MenuItem>
       </Menu>
 
@@ -431,30 +466,35 @@ function App() {
         open={Boolean(editMenuAnchor)}
         onClose={() => setEditMenuAnchor(null)}
       >
-        <MenuItem onClick={handleSplit}>
-          <ListItemIcon>
-            <ContentCut fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>分割页面...</ListItemText>
+        <MenuItem disabled>
+          <ListItemIcon><Undo fontSize="small" /></ListItemIcon>
+          <ListItemText>撤销</ListItemText>
+          <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>⌘Z</Typography>
         </MenuItem>
-        <MenuItem onClick={handleRotateClick}>
-          <ListItemIcon>
-            <Rotate90DegreesCcw fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>旋转页面...</ListItemText>
+        <MenuItem disabled>
+          <ListItemIcon><Redo fontSize="small" /></ListItemIcon>
+          <ListItemText>重做</ListItemText>
+          <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>⇧⌘Z</Typography>
         </MenuItem>
         <Divider />
-        <MenuItem onClick={() => setEditMenuAnchor(null)}>
-          <ListItemIcon>
-            <DeleteOutline fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>删除页面...</ListItemText>
+        <MenuItem disabled>
+          <ListItemIcon><ContentCopy fontSize="small" /></ListItemIcon>
+          <ListItemText>复制</ListItemText>
+          <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>⌘C</Typography>
         </MenuItem>
-        <MenuItem onClick={() => setEditMenuAnchor(null)}>
-          <ListItemIcon>
-            <AddCircleOutline fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>插入空白页...</ListItemText>
+        <MenuItem disabled>
+          <ListItemIcon><SelectAll fontSize="small" /></ListItemIcon>
+          <ListItemText>全选</ListItemText>
+          <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>⌘A</Typography>
+        </MenuItem>
+        <Divider />
+        <MenuItem onClick={handleExtractCurrentPage} disabled={!selectedFile}>
+          <ListItemIcon><FileCopy fontSize="small" /></ListItemIcon>
+          <ListItemText>提取当前页...</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={handleSplit} disabled={!selectedFile}>
+          <ListItemIcon><ContentCut fontSize="small" /></ListItemIcon>
+          <ListItemText>分割所有页面...</ListItemText>
         </MenuItem>
       </Menu>
 
@@ -465,28 +505,28 @@ function App() {
         onClose={() => setViewMenuAnchor(null)}
       >
         <MenuItem onClick={() => { setShowViewer(!showViewer); setViewMenuAnchor(null) }}>
-          <ListItemIcon>
-            <Visibility fontSize="small" />
-          </ListItemIcon>
+          <ListItemIcon><Visibility fontSize="small" /></ListItemIcon>
           <ListItemText>{showViewer ? '隐藏预览' : '显示预览'}</ListItemText>
         </MenuItem>
         <MenuItem onClick={() => { setShowSidebar(!showSidebar); setViewMenuAnchor(null) }}>
-          <ListItemIcon>
-            <ViewSidebar fontSize="small" />
-          </ListItemIcon>
+          <ListItemIcon><ViewSidebar fontSize="small" /></ListItemIcon>
           <ListItemText>{showSidebar ? '隐藏侧边栏' : '显示侧边栏'}</ListItemText>
         </MenuItem>
         <Divider />
-        <MenuItem onClick={() => { setEditMode(!editMode); setViewMenuAnchor(null) }}>
-          <ListItemIcon>
-            <TextFields fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>{editMode ? '查看模式' : '编辑模式'}</ListItemText>
-          {editMode && (
-            <Chip label="当前" size="small" color="primary" sx={{ ml: 1 }} />
-          )}
+        <MenuItem onClick={() => { setViewMode('single'); setViewMenuAnchor(null) }} selected={viewMode === 'single'}>
+          <ListItemIcon><ViewList fontSize="small" /></ListItemIcon>
+          <ListItemText>单页视图</ListItemText>
         </MenuItem>
-
+        <MenuItem onClick={() => { setViewMode('grid'); setViewMenuAnchor(null) }} selected={viewMode === 'grid'} disabled>
+          <ListItemIcon><GridView fontSize="small" /></ListItemIcon>
+          <ListItemText>网格视图</ListItemText>
+        </MenuItem>
+        <Divider />
+        <MenuItem disabled>
+          <ListItemIcon><Fullscreen fontSize="small" /></ListItemIcon>
+          <ListItemText>全屏</ListItemText>
+          <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>F11</Typography>
+        </MenuItem>
       </Menu>
 
       {/* 工具菜单 */}
@@ -496,56 +536,73 @@ function App() {
         onClose={() => setToolsMenuAnchor(null)}
       >
         <MenuItem onClick={handleMerge}>
-          <ListItemIcon>
-            <MergeType fontSize="small" />
-          </ListItemIcon>
+          <ListItemIcon><MergeType fontSize="small" /></ListItemIcon>
           <ListItemText>合并PDF...</ListItemText>
         </MenuItem>
-        <MenuItem onClick={handleOptimize}>
-          <ListItemIcon>
-            <Compress fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>优化压缩</ListItemText>
+        <Divider />
+        <MenuItem onClick={handleExtractText} disabled={!selectedFile}>
+          <ListItemIcon><TextFields fontSize="small" /></ListItemIcon>
+          <ListItemText>提取全部文本</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={handleExtractPageText} disabled={!selectedFile}>
+          <ListItemIcon><Description fontSize="small" /></ListItemIcon>
+          <ListItemText>提取当前页文本</ListItemText>
         </MenuItem>
         <Divider />
-        <MenuItem onClick={handleAddWatermarkClick}>
-          <ListItemIcon>
-            <TextFields fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>添加水印...</ListItemText>
+        <MenuItem onClick={handleShowAnnotations} disabled={!selectedFile}>
+          <ListItemIcon><Comment fontSize="small" /></ListItemIcon>
+          <ListItemText>查看注释</ListItemText>
         </MenuItem>
-        <MenuItem onClick={handleRemoveWatermark}>
-          <ListItemIcon>
-            <TextFields fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>移除水印</ListItemText>
+        <MenuItem onClick={handleShowLinks} disabled={!selectedFile}>
+          <ListItemIcon><Link fontSize="small" /></ListItemIcon>
+          <ListItemText>查看链接</ListItemText>
         </MenuItem>
         <Divider />
-        <MenuItem onClick={handleEncryptClick}>
-          <ListItemIcon>
-            <Lock fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>加密PDF...</ListItemText>
+        <MenuItem onClick={handleShowMetadata} disabled={!selectedFile}>
+          <ListItemIcon><Code fontSize="small" /></ListItemIcon>
+          <ListItemText>查看元数据 (XMP)</ListItemText>
         </MenuItem>
-        <MenuItem onClick={handleDecryptClick}>
-          <ListItemIcon>
-            <LockOpen fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>解密PDF...</ListItemText>
-        </MenuItem>
-        <Divider />
-        <MenuItem onClick={handleExtractImages}>
-          <ListItemIcon>
-            <Image fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>提取图片...</ListItemText>
-        </MenuItem>
-        <Divider />
-        <MenuItem onClick={() => setToolsMenuAnchor(null)}>
-          <ListItemIcon>
-            <Info fontSize="small" />
-          </ListItemIcon>
+        <MenuItem onClick={handleShowInfo} disabled={!selectedFile}>
+          <ListItemIcon><Info fontSize="small" /></ListItemIcon>
           <ListItemText>文档信息</ListItemText>
+        </MenuItem>
+      </Menu>
+
+      {/* 导出菜单 */}
+      <Menu
+        anchorEl={exportMenuAnchor}
+        open={Boolean(exportMenuAnchor)}
+        onClose={() => setExportMenuAnchor(null)}
+      >
+        <MenuItem onClick={handleExportText}>
+          <ListItemIcon><TextFields fontSize="small" /></ListItemIcon>
+          <ListItemText>导出为文本文件...</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={handleExportPageAsImage}>
+          <ListItemIcon><Image fontSize="small" /></ListItemIcon>
+          <ListItemText>导出当前页为图片...</ListItemText>
+        </MenuItem>
+        <Divider />
+        <MenuItem disabled>
+          <ListItemIcon><PhotoSizeSelectLarge fontSize="small" /></ListItemIcon>
+          <ListItemText>批量导出图片...</ListItemText>
+        </MenuItem>
+      </Menu>
+
+      {/* 帮助菜单 */}
+      <Menu
+        anchorEl={helpMenuAnchor}
+        open={Boolean(helpMenuAnchor)}
+        onClose={() => setHelpMenuAnchor(null)}
+      >
+        <MenuItem disabled>
+          <ListItemIcon><Help fontSize="small" /></ListItemIcon>
+          <ListItemText>使用帮助</ListItemText>
+        </MenuItem>
+        <Divider />
+        <MenuItem onClick={() => { setAboutDialog(true); setHelpMenuAnchor(null) }}>
+          <ListItemIcon><Info fontSize="small" /></ListItemIcon>
+          <ListItemText>关于</ListItemText>
         </MenuItem>
       </Menu>
 
@@ -574,27 +631,21 @@ function App() {
             >
               打开文件
             </Button>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+              支持的功能：查看、分割、合并、提取文本、导出图片
+            </Typography>
           </Box>
         ) : (
           <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-            {/* PDF 查看/编辑区域 */}
+            {/* PDF 查看区域 */}
             {showViewer && selectedFile && pdfInfo && (
               <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-                {editMode ? (
-                  <LayerBasedEditor
-                    file={selectedFile}
-                    totalPages={pdfInfo.pageCount || 0}
-                    currentPage={currentPage}
-                    onPageChange={setCurrentPage}
-                  />
-                ) : (
-                  <GoPDFViewer 
-                    file={selectedFile}
-                    totalPages={pdfInfo.pageCount || 0}
-                    currentPage={currentPage}
-                    onPageChange={setCurrentPage}
-                  />
-                )}
+                <GoPDFViewer 
+                  file={selectedFile}
+                  totalPages={pdfInfo.numPages || 0}
+                  currentPage={currentPage}
+                  onPageChange={setCurrentPage}
+                />
               </Box>
             )}
 
@@ -602,121 +653,120 @@ function App() {
             {showSidebar && (
               <Box
                 sx={{
-                  width: showViewer ? 350 : '100%',
+                  width: showViewer ? 320 : '100%',
                   borderLeft: showViewer ? '1px solid #e0e0e0' : 'none',
                   overflow: 'auto',
                   bgcolor: '#fafafa',
                 }}
               >
-                <Container maxWidth={false} sx={{ p: 3 }}>
-                  <Stack spacing={3}>
-              {/* 目录大纲 */}
-              {pdfInfo && (
-                <OutlinePanel 
-                  outline={outline}
-                  currentPage={currentPage}
-                  totalPages={pdfInfo.pageCount}
-                  onPageSelect={setCurrentPage}
-                />
-              )}
-
-              <Card>
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>
-                    当前文件
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {selectedFile}
-                  </Typography>
-                </CardContent>
-              </Card>
-
-              {pdfInfo && (
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>
-                      PDF信息
-                    </Typography>
-                    <Stack spacing={2} sx={{ mt: 1 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          文件名:
+                <Container maxWidth={false} sx={{ p: 2 }}>
+                  <Stack spacing={2}>
+                    <Card variant="outlined">
+                      <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                        <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                          当前文件
                         </Typography>
-                        <Typography variant="body2" fontWeight="medium">
+                        <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
                           {getFileName(selectedFile)}
                         </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          页数:
-                        </Typography>
-                        <Chip label={`${pdfInfo.pageCount} 页`} size="small" color="primary" />
-                      </Box>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              )}
+                      </CardContent>
+                    </Card>
 
-              {/* 快捷操作 */}
-              {selectedFile && (
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>
-                      快捷操作
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mt: 1 }}>
-                      <Button
-                        variant="outlined"
-                        startIcon={<Rotate90DegreesCcw />}
-                        onClick={handleRotateClick}
-                        sx={{ minWidth: 120 }}
-                      >
-                        旋转
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        startIcon={<ContentCut />}
-                        onClick={handleSplit}
-                        sx={{ minWidth: 120 }}
-                      >
-                        分割
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        startIcon={<Compress />}
-                        onClick={handleOptimize}
-                        sx={{ minWidth: 120 }}
-                      >
-                        优化
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        startIcon={<TextFields />}
-                        onClick={handleAddWatermarkClick}
-                        sx={{ minWidth: 120 }}
-                      >
-                        水印
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        startIcon={<Lock />}
-                        onClick={handleEncryptClick}
-                        sx={{ minWidth: 120 }}
-                      >
-                        加密
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        startIcon={<Image />}
-                        onClick={handleExtractImages}
-                        sx={{ minWidth: 120 }}
-                      >
-                        提取图片
-                      </Button>
-                    </Box>
-                  </CardContent>
-                </Card>
-              )}
+                    {pdfInfo && (
+                      <Card variant="outlined">
+                        <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                            文档信息
+                          </Typography>
+                          <Stack spacing={1}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <Typography variant="body2" color="text.secondary">页数</Typography>
+                              <Chip label={`${pdfInfo.numPages} 页`} size="small" color="primary" />
+                            </Box>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <Typography variant="body2" color="text.secondary">版本</Typography>
+                              <Typography variant="body2">{pdfInfo.version}</Typography>
+                            </Box>
+                            {pdfInfo.title && (
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <Typography variant="body2" color="text.secondary">标题</Typography>
+                                <Typography variant="body2" sx={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {pdfInfo.title}
+                                </Typography>
+                              </Box>
+                            )}
+                            {pdfInfo.author && (
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <Typography variant="body2" color="text.secondary">作者</Typography>
+                                <Typography variant="body2">{pdfInfo.author}</Typography>
+                              </Box>
+                            )}
+                            <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 1 }}>
+                              {pdfInfo.encrypted && <Chip label="加密" size="small" color="warning" />}
+                              {pdfInfo.tagged && <Chip label="标签" size="small" />}
+                              {pdfInfo.hasForms && <Chip label="表单" size="small" color="info" />}
+                            </Box>
+                          </Stack>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* 快捷操作 */}
+                    <Card variant="outlined">
+                      <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+                        <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                          快捷操作
+                        </Typography>
+                        <Stack spacing={1}>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            fullWidth
+                            startIcon={<ContentCut />}
+                            onClick={handleSplit}
+                          >
+                            分割所有页面
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            fullWidth
+                            startIcon={<FileCopy />}
+                            onClick={handleExtractCurrentPage}
+                          >
+                            提取当前页
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            fullWidth
+                            startIcon={<MergeType />}
+                            onClick={handleMerge}
+                          >
+                            合并PDF
+                          </Button>
+                          <Divider />
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            fullWidth
+                            startIcon={<TextFields />}
+                            onClick={handleExtractText}
+                          >
+                            提取全部文本
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            fullWidth
+                            startIcon={<Image />}
+                            onClick={handleExportPageAsImage}
+                          >
+                            导出当前页为图片
+                          </Button>
+                        </Stack>
+                      </CardContent>
+                    </Card>
                   </Stack>
                 </Container>
               </Box>
@@ -725,110 +775,165 @@ function App() {
         )}
       </Box>
 
-      {/* 水印对话框 */}
-      <Dialog open={watermarkDialog} onClose={() => setWatermarkDialog(false)}>
-        <DialogTitle>添加水印</DialogTitle>
+      {/* 文档信息对话框 */}
+      <Dialog open={infoDialog} onClose={() => setInfoDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>文档信息</DialogTitle>
         <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="水印文字"
-            fullWidth
-            value={watermarkText}
-            onChange={(e) => setWatermarkText(e.target.value)}
-            placeholder="请输入水印文字"
-          />
+          {pdfInfo && (
+            <Stack spacing={1.5} sx={{ mt: 1 }}>
+              <Box><strong>路径:</strong> {pdfInfo.path}</Box>
+              <Box><strong>页数:</strong> {pdfInfo.numPages}</Box>
+              <Box><strong>版本:</strong> {pdfInfo.version}</Box>
+              {pdfInfo.title && <Box><strong>标题:</strong> {pdfInfo.title}</Box>}
+              {pdfInfo.author && <Box><strong>作者:</strong> {pdfInfo.author}</Box>}
+              {pdfInfo.subject && <Box><strong>主题:</strong> {pdfInfo.subject}</Box>}
+              {pdfInfo.keywords && <Box><strong>关键词:</strong> {pdfInfo.keywords}</Box>}
+              {pdfInfo.creator && <Box><strong>创建程序:</strong> {pdfInfo.creator}</Box>}
+              {pdfInfo.producer && <Box><strong>PDF生成器:</strong> {pdfInfo.producer}</Box>}
+              {pdfInfo.creationDate && <Box><strong>创建日期:</strong> {pdfInfo.creationDate}</Box>}
+              {pdfInfo.modDate && <Box><strong>修改日期:</strong> {pdfInfo.modDate}</Box>}
+              <Box><strong>加密:</strong> {pdfInfo.encrypted ? '是' : '否'}</Box>
+              <Box><strong>标签:</strong> {pdfInfo.tagged ? '是' : '否'}</Box>
+              <Box><strong>表单:</strong> {pdfInfo.hasForms ? '是' : '否'}</Box>
+            </Stack>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setWatermarkDialog(false)}>取消</Button>
-          <Button onClick={handleAddWatermarkConfirm} variant="contained" disabled={!watermarkText}>
-            确定
-          </Button>
+          <Button onClick={() => setInfoDialog(false)}>关闭</Button>
         </DialogActions>
       </Dialog>
 
-      {/* 旋转对话框 */}
-      <Dialog open={rotateDialog} onClose={() => setRotateDialog(false)}>
-        <DialogTitle>旋转页面</DialogTitle>
+      {/* 提取文本对话框 */}
+      <Dialog open={textDialog} onClose={() => setTextDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>提取的文本（全部页面）</DialogTitle>
         <DialogContent>
-          <Box sx={{ pt: 2 }}>
-            <Typography variant="body2" gutterBottom>
-              选择旋转角度:
-            </Typography>
-            <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
-              {['90', '180', '270'].map((angle) => (
-                <Button
-                  key={angle}
-                  variant={rotationAngle === angle ? 'contained' : 'outlined'}
-                  onClick={() => setRotationAngle(angle)}
-                >
-                  {angle}°
-                </Button>
+          <TextField
+            multiline
+            fullWidth
+            rows={20}
+            value={extractedText}
+            InputProps={{ readOnly: true }}
+            sx={{ mt: 1 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => navigator.clipboard.writeText(extractedText)}>复制</Button>
+          <Button onClick={() => setTextDialog(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 当前页文本对话框 */}
+      <Dialog open={pageTextDialog} onClose={() => setPageTextDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>第 {currentPage} 页文本</DialogTitle>
+        <DialogContent>
+          <TextField
+            multiline
+            fullWidth
+            rows={15}
+            value={pageText}
+            InputProps={{ readOnly: true }}
+            sx={{ mt: 1 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => navigator.clipboard.writeText(pageText)}>复制</Button>
+          <Button onClick={() => setPageTextDialog(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 注释对话框 */}
+      <Dialog open={annotationsDialog} onClose={() => setAnnotationsDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>第 {currentPage} 页注释</DialogTitle>
+        <DialogContent>
+          {annotations.length === 0 ? (
+            <Typography color="text.secondary" sx={{ mt: 2 }}>此页面没有注释</Typography>
+          ) : (
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              {annotations.map((annot, index) => (
+                <Card key={index} variant="outlined">
+                  <CardContent>
+                    <Typography variant="subtitle2">{annot.subtype || '未知类型'}</Typography>
+                    {annot.contents && <Typography variant="body2">{annot.contents}</Typography>}
+                    {annot.title && <Typography variant="caption" color="text.secondary">作者: {annot.title}</Typography>}
+                    {annot.uri && <Typography variant="caption" color="primary" display="block">链接: {annot.uri}</Typography>}
+                  </CardContent>
+                </Card>
               ))}
             </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAnnotationsDialog(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 链接对话框 */}
+      <Dialog open={linksDialog} onClose={() => setLinksDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>第 {currentPage} 页链接</DialogTitle>
+        <DialogContent>
+          {links.length === 0 ? (
+            <Typography color="text.secondary" sx={{ mt: 2 }}>此页面没有链接</Typography>
+          ) : (
+            <Stack spacing={1} sx={{ mt: 1 }}>
+              {links.map((link, index) => (
+                <Card key={index} variant="outlined">
+                  <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
+                    <Typography variant="body2" color="primary">
+                      {link.uri || '内部链接'}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      位置: ({link.x.toFixed(0)}, {link.y.toFixed(0)}) - 大小: {link.width.toFixed(0)} x {link.height.toFixed(0)}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              ))}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setLinksDialog(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 元数据对话框 */}
+      <Dialog open={metadataDialog} onClose={() => setMetadataDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>XMP 元数据</DialogTitle>
+        <DialogContent>
+          <TextField
+            multiline
+            fullWidth
+            rows={15}
+            value={metadata}
+            InputProps={{ readOnly: true }}
+            sx={{ mt: 1, fontFamily: 'monospace' }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => navigator.clipboard.writeText(metadata)}>复制</Button>
+          <Button onClick={() => setMetadataDialog(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 关于对话框 */}
+      <Dialog open={aboutDialog} onClose={() => setAboutDialog(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>关于 PDF编辑器</DialogTitle>
+        <DialogContent>
+          <Box sx={{ textAlign: 'center', py: 2 }}>
+            <PictureAsPdf sx={{ fontSize: 64, color: 'primary.main', mb: 2 }} />
+            <Typography variant="h6">PDF编辑器</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              版本 1.0.0
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+              基于 Go + Wails + React 构建
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              使用 go-poppler 纯 Go PDF 库
+            </Typography>
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setRotateDialog(false)}>取消</Button>
-          <Button onClick={handleRotateConfirm} variant="contained">
-            确定
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* 加密对话框 */}
-      <Dialog open={encryptDialog} onClose={() => setEncryptDialog(false)}>
-        <DialogTitle>加密PDF</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="用户密码（打开密码）"
-            type="password"
-            fullWidth
-            value={userPassword}
-            onChange={(e) => setUserPassword(e.target.value)}
-            placeholder="用于打开PDF的密码"
-          />
-          <TextField
-            margin="dense"
-            label="所有者密码（权限密码）"
-            type="password"
-            fullWidth
-            value={ownerPassword}
-            onChange={(e) => setOwnerPassword(e.target.value)}
-            placeholder="用于修改PDF权限的密码"
-            sx={{ mt: 2 }}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEncryptDialog(false)}>取消</Button>
-          <Button onClick={handleEncryptConfirm} variant="contained" disabled={!userPassword || !ownerPassword}>
-            确定
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* 解密对话框 */}
-      <Dialog open={decryptDialog} onClose={() => setDecryptDialog(false)}>
-        <DialogTitle>解密PDF</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="密码"
-            type="password"
-            fullWidth
-            value={decryptPassword}
-            onChange={(e) => setDecryptPassword(e.target.value)}
-            placeholder="请输入PDF密码"
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDecryptDialog(false)}>取消</Button>
-          <Button onClick={handleDecryptConfirm} variant="contained" disabled={!decryptPassword}>
-            确定
-          </Button>
+          <Button onClick={() => setAboutDialog(false)}>关闭</Button>
         </DialogActions>
       </Dialog>
 
