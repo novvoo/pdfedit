@@ -222,18 +222,37 @@ func (a *App) RenderPDFPage(path string, pageNum int, dpi float64) (string, erro
 		dpi = 150
 	}
 
-	// 使用 PageRenderer 来获取 PNG 数据
-	pageRenderer := pdf.NewPageRenderer(doc, pdf.RenderOptions{
-		DPI:    dpi,
-		Format: "png",
-	})
+	// 使用新的 API 渲染页面
+	renderer := pdf.NewRenderer(doc)
+	renderer.SetResolution(dpi, dpi)
 
-	renderedPage, err := pageRenderer.RenderPage(pageNum)
+	renderedImg, err := renderer.RenderPage(pageNum)
 	if err != nil {
 		return "", err
 	}
 
-	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(renderedPage.Data), nil
+	// 创建临时文件保存图像
+	tmpFile, err := os.CreateTemp("", "page-*.png")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpPath)
+
+	// 保存图像到临时文件
+	err = renderer.SaveImage(renderedImg, tmpPath, "png")
+	if err != nil {
+		return "", err
+	}
+
+	// 读取文件内容
+	pngData, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return "", err
+	}
+
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngData), nil
 }
 
 // RenderPageToFile renders a page to a file
@@ -384,7 +403,7 @@ func (a *App) MergePDFs(inputPaths []string, outputPath string) error {
 		doc, err := pdf.Open(p)
 		if err != nil {
 			// Close already opened docs
-			for j := 0; j < i; j++ {
+			for j := range i {
 				docs[j].Close()
 			}
 			return err
@@ -451,6 +470,71 @@ func (a *App) ExportToText(path string, outputPath string) error {
 	}
 
 	return os.WriteFile(outputPath, []byte(text), 0644)
+}
+
+// ExportToMarkdown exports the document to Markdown format
+func (a *App) ExportToMarkdown(path string, outputPath string, includeImages bool) error {
+	doc, err := pdf.Open(path)
+	if err != nil {
+		return err
+	}
+	defer doc.Close()
+
+	// 创建 Markdown writer
+	mdWriter := pdf.NewMarkdownWriter(doc, pdf.MarkdownOptions{
+		IncludeImages:    includeImages,
+		ExtractImages:    includeImages,
+		ImagePrefix:      "image",
+		PageSeparator:    "\n\n---\n\n",
+		HeadingDetection: true,
+	})
+
+	// 创建输出文件
+	f, err := os.Create(outputPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	return mdWriter.Write(f)
+}
+
+// ExtractMarkdown extracts markdown from the entire document
+func (a *App) ExtractMarkdown(path string, includeImages bool) (string, error) {
+	markdown, err := pdf.ConvertToMarkdown(path, pdf.MarkdownOptions{
+		IncludeImages:    includeImages,
+		ExtractImages:    false, // 不提取图像文件，只返回文本
+		PageSeparator:    "\n\n---\n\n",
+		HeadingDetection: true,
+	})
+	return markdown, err
+}
+
+// ExtractPageMarkdown extracts markdown from a specific page
+func (a *App) ExtractPageMarkdown(path string, pageNum int, includeImages bool) (string, error) {
+	doc, err := pdf.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer doc.Close()
+
+	// 创建 Markdown writer，只处理指定页面
+	mdWriter := pdf.NewMarkdownWriter(doc, pdf.MarkdownOptions{
+		FirstPage:        pageNum,
+		LastPage:         pageNum,
+		IncludeImages:    includeImages,
+		ExtractImages:    false,
+		HeadingDetection: true,
+	})
+
+	// 使用 strings.Builder 收集输出
+	var builder strings.Builder
+	err = mdWriter.Write(&builder)
+	if err != nil {
+		return "", err
+	}
+
+	return builder.String(), nil
 }
 
 // ExportToSVG exports a page to SVG format
@@ -522,7 +606,7 @@ func (a *App) GetJavaScript(path string) ([]string, error) {
 }
 
 // GetNamedDestinations returns all named destinations
-func (a *App) GetNamedDestinations(path string) (map[string]interface{}, error) {
+func (a *App) GetNamedDestinations(path string) (map[string]any, error) {
 	doc, err := pdf.Open(path)
 	if err != nil {
 		return nil, err
@@ -549,13 +633,35 @@ func (a *App) SelectPDFFiles() ([]string, error) {
 }
 
 // SelectOutputFile opens a dialog to select output file
-func (a *App) SelectOutputFile(defaultName string) (string, error) {
+func (a *App) SelectOutputFile(defaultName string, fileType string) (string, error) {
+	filters := []runtime.FileFilter{
+		{DisplayName: "PDF Files", Pattern: "*.pdf"},
+	}
+
+	// 根据文件类型添加不同的过滤器
+	switch fileType {
+	case "text":
+		filters = []runtime.FileFilter{
+			{DisplayName: "Text Files", Pattern: "*.txt"},
+		}
+	case "markdown":
+		filters = []runtime.FileFilter{
+			{DisplayName: "Markdown Files", Pattern: "*.md"},
+		}
+	case "svg":
+		filters = []runtime.FileFilter{
+			{DisplayName: "SVG Files", Pattern: "*.svg"},
+		}
+	case "ps":
+		filters = []runtime.FileFilter{
+			{DisplayName: "PostScript Files", Pattern: "*.ps"},
+		}
+	}
+
 	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "保存文件",
 		DefaultFilename: defaultName,
-		Filters: []runtime.FileFilter{
-			{DisplayName: "PDF Files", Pattern: "*.pdf"},
-		},
+		Filters:         filters,
 	})
 	if err != nil {
 		return "", err

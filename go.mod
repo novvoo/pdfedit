@@ -3,7 +3,7 @@ module pdf-editor
 go 1.24.4
 
 require (
-	github.com/novvoo/go-poppler v0.0.0-20251201101310-a39269330743
+	github.com/novvoo/go-poppler v0.0.0-20251203062514-e8e7b86b4530
 	github.com/wailsapp/wails/v2 v2.11.0
 )
 
@@ -31,8 +31,8 @@ require (
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/wailsapp/go-webview2 v1.0.22 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
-	golang.org/x/crypto v0.43.0 // indirect
-	golang.org/x/net v0.45.0 // indirect
-	golang.org/x/sys v0.37.0 // indirect
-	golang.org/x/text v0.30.0 // indirect
+	golang.org/x/crypto v0.45.0 // indirect
+	golang.org/x/net v0.47.0 // indirect
+	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/text v0.31.0 // indirect
 )

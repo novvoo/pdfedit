@@ -53,6 +53,7 @@ import {
   Code,
   Description,
   PhotoSizeSelectLarge,
+  Article,
 } from '@mui/icons-material'
 import {
   OpenPDF,
@@ -66,6 +67,9 @@ import {
   SelectOutputFile,
   SelectOutputDirectory,
   ExportToText,
+  ExportToMarkdown,
+  ExtractMarkdown,
+  ExtractPageMarkdown,
   GetAnnotations,
   GetLinks,
   RenderPageToFile,
@@ -100,6 +104,10 @@ function App() {
   const [pageTextDialog, setPageTextDialog] = useState(false)
   const [pageText, setPageText] = useState('')
   const [aboutDialog, setAboutDialog] = useState(false)
+  const [markdownDialog, setMarkdownDialog] = useState(false)
+  const [extractedMarkdown, setExtractedMarkdown] = useState('')
+  const [pageMarkdownDialog, setPageMarkdownDialog] = useState(false)
+  const [pageMarkdown, setPageMarkdown] = useState('')
   
   // 加载和通知状态
   const [loading, setLoading] = useState(false)
@@ -158,7 +166,7 @@ function App() {
         setLoading(false)
         return
       }
-      const outputPath = await SelectOutputFile('merged.pdf')
+      const outputPath = await SelectOutputFile('merged.pdf', 'pdf')
       if (!outputPath) {
         setLoading(false)
         return
@@ -226,7 +234,7 @@ function App() {
     if (!selectedFile) return
     setLoading(true)
     try {
-      const outputPath = await SelectOutputFile('output.txt')
+      const outputPath = await SelectOutputFile('output.txt', 'text')
       if (!outputPath) {
         setLoading(false)
         return
@@ -241,11 +249,60 @@ function App() {
     }
   }
 
+  const handleExportMarkdown = async () => {
+    if (!selectedFile) return
+    setLoading(true)
+    try {
+      const outputPath = await SelectOutputFile('output.md', 'markdown')
+      if (!outputPath) {
+        setLoading(false)
+        return
+      }
+      await ExportToMarkdown(selectedFile, outputPath, false)
+      showMessage(`Markdown已导出到: ${outputPath}`, 'success')
+    } catch (error) {
+      showMessage(`导出Markdown失败: ${error}`, 'error')
+    } finally {
+      setLoading(false)
+      setExportMenuAnchor(null)
+    }
+  }
+
+  const handleExtractMarkdown = async () => {
+    if (!selectedFile) return
+    setLoading(true)
+    try {
+      const markdown = await ExtractMarkdown(selectedFile, false)
+      setExtractedMarkdown(markdown)
+      setMarkdownDialog(true)
+    } catch (error) {
+      showMessage(`提取Markdown失败: ${error}`, 'error')
+    } finally {
+      setLoading(false)
+      setToolsMenuAnchor(null)
+    }
+  }
+
+  const handleExtractPageMarkdown = async () => {
+    if (!selectedFile) return
+    setLoading(true)
+    try {
+      const markdown = await ExtractPageMarkdown(selectedFile, currentPage, false)
+      setPageMarkdown(markdown)
+      setPageMarkdownDialog(true)
+    } catch (error) {
+      showMessage(`提取当前页Markdown失败: ${error}`, 'error')
+    } finally {
+      setLoading(false)
+      setToolsMenuAnchor(null)
+    }
+  }
+
   const handleExportPageAsImage = async () => {
     if (!selectedFile) return
     setLoading(true)
     try {
-      const outputPath = await SelectOutputFile(`page_${currentPage}.png`)
+      const outputPath = await SelectOutputFile(`page_${currentPage}.png`, 'pdf')
       if (!outputPath) {
         setLoading(false)
         return
@@ -264,7 +321,7 @@ function App() {
     if (!selectedFile) return
     setLoading(true)
     try {
-      const outputPath = await SelectOutputFile(`page_${currentPage}.pdf`)
+      const outputPath = await SelectOutputFile(`page_${currentPage}.pdf`, 'pdf')
       if (!outputPath) {
         setLoading(false)
         return
@@ -549,6 +606,15 @@ function App() {
           <ListItemText>提取当前页文本</ListItemText>
         </MenuItem>
         <Divider />
+        <MenuItem onClick={handleExtractMarkdown} disabled={!selectedFile}>
+          <ListItemIcon><Article fontSize="small" /></ListItemIcon>
+          <ListItemText>提取全部Markdown</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={handleExtractPageMarkdown} disabled={!selectedFile}>
+          <ListItemIcon><Article fontSize="small" /></ListItemIcon>
+          <ListItemText>提取当前页Markdown</ListItemText>
+        </MenuItem>
+        <Divider />
         <MenuItem onClick={handleShowAnnotations} disabled={!selectedFile}>
           <ListItemIcon><Comment fontSize="small" /></ListItemIcon>
           <ListItemText>查看注释</ListItemText>
@@ -578,6 +644,11 @@ function App() {
           <ListItemIcon><TextFields fontSize="small" /></ListItemIcon>
           <ListItemText>导出为文本文件...</ListItemText>
         </MenuItem>
+        <MenuItem onClick={handleExportMarkdown}>
+          <ListItemIcon><Article fontSize="small" /></ListItemIcon>
+          <ListItemText>导出为Markdown...</ListItemText>
+        </MenuItem>
+        <Divider />
         <MenuItem onClick={handleExportPageAsImage}>
           <ListItemIcon><Image fontSize="small" /></ListItemIcon>
           <ListItemText>导出当前页为图片...</ListItemText>
@@ -759,6 +830,15 @@ function App() {
                             variant="outlined"
                             size="small"
                             fullWidth
+                            startIcon={<Article />}
+                            onClick={handleExtractMarkdown}
+                          >
+                            提取全部Markdown
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            fullWidth
                             startIcon={<Image />}
                             onClick={handleExportPageAsImage}
                           >
@@ -838,6 +918,44 @@ function App() {
         <DialogActions>
           <Button onClick={() => navigator.clipboard.writeText(pageText)}>复制</Button>
           <Button onClick={() => setPageTextDialog(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Markdown 对话框 */}
+      <Dialog open={markdownDialog} onClose={() => setMarkdownDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>提取的 Markdown（全部页面）</DialogTitle>
+        <DialogContent>
+          <TextField
+            multiline
+            fullWidth
+            rows={20}
+            value={extractedMarkdown}
+            InputProps={{ readOnly: true }}
+            sx={{ mt: 1, fontFamily: 'monospace' }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => navigator.clipboard.writeText(extractedMarkdown)}>复制</Button>
+          <Button onClick={() => setMarkdownDialog(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 当前页 Markdown 对话框 */}
+      <Dialog open={pageMarkdownDialog} onClose={() => setPageMarkdownDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>第 {currentPage} 页 Markdown</DialogTitle>
+        <DialogContent>
+          <TextField
+            multiline
+            fullWidth
+            rows={15}
+            value={pageMarkdown}
+            InputProps={{ readOnly: true }}
+            sx={{ mt: 1, fontFamily: 'monospace' }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => navigator.clipboard.writeText(pageMarkdown)}>复制</Button>
+          <Button onClick={() => setPageMarkdownDialog(false)}>关闭</Button>
         </DialogActions>
       </Dialog>
 
